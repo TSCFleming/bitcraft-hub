@@ -25,6 +25,7 @@ use crate::player_state::bitcraft::{
     start_worker_player_state, start_worker_player_username_state,
 };
 use crate::skill_descriptions::bitcraft::start_worker_skill_desc;
+use crate::terrain_chunk_state::bitcraft::start_worker_terrain_chunk_state;
 use crate::trading_orders::bitcraft::start_worker_trade_order_state;
 use crate::traveler_task_desc::bitcraft::start_worker_traveler_task_desc;
 use crate::traveler_task_state::bitcraft::start_worker_traveler_task_state;
@@ -349,6 +350,7 @@ async fn connect_to_db_logic(
     building_nickname_state_tx: &UnboundedSender<SpacetimeUpdateMessages<BuildingNicknameState>>,
     crafting_recipe_desc_tx: &UnboundedSender<SpacetimeUpdateMessages<CraftingRecipeDesc>>,
     item_list_desc_tx: &UnboundedSender<SpacetimeUpdateMessages<ItemListDesc>>,
+    terrain_chunk_state_tx: &UnboundedSender<SpacetimeUpdateMessages<TerrainChunkState>>,
     traveler_task_desc_tx: &UnboundedSender<SpacetimeUpdateMessages<TravelerTaskDesc>>,
     traveler_task_state_tx: &UnboundedSender<SpacetimeUpdateMessages<TravelerTaskState>>,
     trade_order_state_tx: &UnboundedSender<SpacetimeUpdateMessages<TradeOrderState>>,
@@ -520,6 +522,13 @@ async fn connect_to_db_logic(
         AuctionListingState,
         database
     );
+    setup_spacetime_db_listeners!(
+        ctx,
+        terrain_chunk_state,
+        terrain_chunk_state_tx,
+        TerrainChunkState,
+        database
+    );
     setup_spacetime_db_listeners!(ctx, npc_desc, npc_desc_tx, NpcDesc, database);
 
     setup_spacetime_db_listeners!(ctx, user_state, user_state_tx, UserState, database);
@@ -556,7 +565,6 @@ async fn connect_to_db_logic(
         "claim_local_state",
         "deployable_state",
         "inventory_state",
-        "collectible_desc",
         "claim_tech_desc",
         "resource_desc",
         "identity_role",
@@ -565,6 +573,7 @@ async fn connect_to_db_logic(
         // "select location_state.* from location_state JOIN player_state ps ON player_state.entity_id = location_state.entity_id", // This currently takes to much cpu to run
         // "select location_state.* from location_state JOIN building_state ps ON building_state.entity_id = building_state.entity_id", // This currently takes to much cpu to run
         // "select location_state.* from location_state JOIN deployable_state ps ON deployable_state.entity_id = deployable_state.entity_id", // This currently takes to much cpu to run
+        "terrain_chunk_state",
         "traveler_task_desc",
         "traveler_task_state",
         // "trade_order_state",
@@ -595,6 +604,7 @@ async fn connect_to_db_logic(
     let tmp_building_nickname_state_tx = building_nickname_state_tx.clone();
     let tmp_crafting_recipe_desc_tx = crafting_recipe_desc_tx.clone();
     let tmp_item_list_desc_tx = item_list_desc_tx.clone();
+    let tmp_terrain_chunk_state_tx = terrain_chunk_state_tx.clone();
     let tmp_traveler_task_desc_tx = traveler_task_desc_tx.clone();
     let tmp_traveler_task_state_tx = traveler_task_state_tx.clone();
     let tmp_trade_order_state_tx = trade_order_state_tx.clone();
@@ -817,6 +827,20 @@ async fn connect_to_db_logic(
             }
 
             let tmp_database_name_arc = database_name_arc.clone();
+            let terrain_chunk_state = ctx.db.terrain_chunk_state().iter().collect::<Vec<_>>();
+            tracing::info!(
+                "Initial terrain_chunk_state rows from {}: {}",
+                tmp_database_name_arc,
+                terrain_chunk_state.len()
+            );
+            if !terrain_chunk_state.is_empty() {
+                let _ = tmp_terrain_chunk_state_tx.send(SpacetimeUpdateMessages::Initial {
+                    database_name: tmp_database_name_arc.clone(),
+                    data: terrain_chunk_state,
+                });
+            }
+
+            let tmp_database_name_arc = database_name_arc.clone();
             let traveler_task_state = ctx.db.traveler_task_state().iter().collect::<Vec<_>>();
             if !traveler_task_state.is_empty() {
                 let _ = tmp_traveler_task_state_tx.send(SpacetimeUpdateMessages::Initial {
@@ -858,15 +882,6 @@ async fn connect_to_db_logic(
                 let _ = tmp_buy_order_state_tx.send(SpacetimeUpdateMessages::Initial {
                     database_name: tmp_database_name_arc.clone(),
                     data: buy_order_state,
-                });
-            }
-
-            let tmp_database_name_arc = database_name_arc.clone();
-            let collectible_desc = ctx.db.collectible_desc().iter().collect::<Vec<_>>();
-            if !collectible_desc.is_empty() {
-                let _ = tmp_collectible_desc_tx.send(SpacetimeUpdateMessages::Initial {
-                    database_name: tmp_database_name_arc.clone(),
-                    data: collectible_desc,
                 });
             }
 
@@ -957,7 +972,8 @@ pub fn start_websocket_bitcraft_logic(config: Config, global_app_state: AppState
 
         let (crafting_recipe_desc_tx, crafting_recipe_desc_desc_rx) =
             tokio::sync::mpsc::unbounded_channel();
-
+        let (terrain_chunk_state_tx, terrain_chunk_state_rx) =
+            tokio::sync::mpsc::unbounded_channel();
         let (traveler_task_desc_tx, traveler_task_desc_rx) = tokio::sync::mpsc::unbounded_channel();
         let (traveler_task_state_tx, traveler_task_state_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -997,6 +1013,7 @@ pub fn start_websocket_bitcraft_logic(config: Config, global_app_state: AppState
                 let tmp_inventory_state_tx = inventory_state_tx.clone();
                 let tmp_item_desc_tx = item_desc_tx.clone();
                 let tmp_cargo_desc_tx = cargo_desc_tx.clone();
+                let tmp_terrain_chunk_state_tx = terrain_chunk_state_tx.clone();
                 let tmp_vault_state_collectibles_tx = vault_state_collectibles_tx.clone();
                 let tmp_deployable_state_tx = deployable_state_tx.clone();
                 let tmp_claim_state_tx = claim_state_tx.clone();
@@ -1062,6 +1079,7 @@ pub fn start_websocket_bitcraft_logic(config: Config, global_app_state: AppState
                             &tmp_building_nickname_state_tx,
                             &tmp_crafting_recipe_desc_tx,
                             &tmp_item_list_desc_tx,
+                            &tmp_terrain_chunk_state_tx,
                             &tmp_traveler_task_desc_tx,
                             &tmp_traveler_task_state_tx,
                             &tmp_trade_order_state_tx,
@@ -1110,172 +1128,188 @@ pub fn start_websocket_bitcraft_logic(config: Config, global_app_state: AppState
                 remove_desc = true;
             });
 
+        if config.terrain_chunk_state_only {
+            start_worker_terrain_chunk_state(
+                global_app_state.clone(),
+                terrain_chunk_state_rx,
+                50,
+                Duration::from_millis(100),
+            );
+            return;
+        }
+
         start_worker_mobile_entity_state(global_app_state.clone(), mobile_entity_state_rx);
         start_worker_player_state(
             global_app_state.clone(),
             player_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_player_username_state(
             global_app_state.clone(),
             player_username_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_experience_state(
             global_app_state.clone(),
             experience_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_inventory_state(
             global_app_state.clone(),
             inventory_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_vault_state_collectibles(
             global_app_state.clone(),
             vault_state_collectibles_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_item_desc(
             global_app_state.clone(),
             item_desc_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_cargo_desc(
             global_app_state.clone(),
             cargo_desc_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_deployable_state(
             global_app_state.clone(),
             deployable_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_claim_state(
             global_app_state.clone(),
             claim_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_claim_local_state(
             global_app_state.clone(),
             claim_local_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_claim_member_state(
             global_app_state.clone(),
             claim_member_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_skill_desc(
             global_app_state.clone(),
             skill_desc_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_claim_tech_state(
             global_app_state.clone(),
             claim_tech_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_claim_tech_desc(
             global_app_state.clone(),
             claim_tech_desc_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_building_state(
             global_app_state.clone(),
             building_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_building_desc(
             global_app_state.clone(),
             building_desc_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_location_state(
             global_app_state.clone(),
             location_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_building_nickname_state(
             global_app_state.clone(),
             building_nickname_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_crafting_recipe_desc(
             global_app_state.clone(),
             crafting_recipe_desc_desc_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_item_list_desc(
             global_app_state.clone(),
             item_list_desc_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
+        );
+        start_worker_terrain_chunk_state(
+            global_app_state.clone(),
+            terrain_chunk_state_rx,
+            50,
+            Duration::from_millis(100),
         );
         start_worker_traveler_task_desc(
             global_app_state.clone(),
             traveler_task_desc_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_traveler_task_state(
             global_app_state.clone(),
             traveler_task_state_rx,
             6000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
         start_worker_trade_order_state(
             global_app_state.clone(),
             trade_order_state_rx,
             6000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
 
         start_worker_npc_desc(
             global_app_state.clone(),
             npc_desc_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
 
         start_worker_buy_order_state(
             global_app_state.clone(),
             buy_order_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
 
         start_worker_sell_order_state(
             global_app_state.clone(),
             sell_order_state_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
 
         start_worker_collectible_desc(
             global_app_state.clone(),
             collectible_desc_rx,
             3000,
-            Duration::from_millis(50),
+            Duration::from_millis(1),
         );
 
         start_worker_user_state(global_app_state.clone(), user_state_rx);
@@ -1397,6 +1431,7 @@ pub(crate) enum WebSocketMessages {
         skill_name: String,
     },
     PlayerState(entity::player_state::Model),
+    TerrainChunkState(entity::terrain_chunk_state::Model),
     TravelerTaskState(entity::traveler_task_state::Model),
     TravelerTaskStateDelete(entity::traveler_task_state::Model),
     // ClaimDescriptionState(entity::claim_description_state::Model),
@@ -1490,6 +1525,10 @@ impl WebSocketMessages {
             WebSocketMessages::ActionState(action_state) => Some(vec![(
                 "action_state".to_string(),
                 Some(action_state.owner_entity_id as i64),
+            )]),
+            WebSocketMessages::TerrainChunkState(terrain_chunk_state) => Some(vec![(
+                "terrain_chunk_state".to_string(),
+                Some(terrain_chunk_state.chunk_index),
             )]),
             WebSocketMessages::TravelerTaskState(traveler_task_state) => Some(vec![
                 (

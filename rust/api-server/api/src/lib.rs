@@ -1238,8 +1238,11 @@ you should provide the directory of that submodule.",
         #[arg(long, help = "Live updates")]
         live_updates_ws: Option<bool>,
 
-        #[arg(long, help = "Only update terrain_chunk_state")]
-        terrain_chunk_only: Option<bool>,
+        #[arg(
+            long,
+            help = "Only sync terrain_chunk_state (skip other websocket tables)"
+        )]
+        terrain_chunk_state_only: Option<bool>,
     },
     PrintConfig {
         #[arg(long, help = "Format to print the config", default_value = "json", value_parser = ["yml","yaml","json","toml"])]
@@ -1271,13 +1274,13 @@ pub async fn main() -> anyhow::Result<()> {
             host,
             storage_path,
             live_updates_ws,
-            terrain_chunk_only,
+            terrain_chunk_state_only,
         } => {
             cli_config_parameters.host = host.clone();
             cli_config_parameters.port = *port;
             cli_config_parameters.storage_path = storage_path.clone();
             cli_config_parameters.live_updates_ws = *live_updates_ws;
-            cli_config_parameters.terrain_chunk_only = *terrain_chunk_only;
+            cli_config_parameters.terrain_chunk_state_only = *terrain_chunk_state_only;
         }
     }
 

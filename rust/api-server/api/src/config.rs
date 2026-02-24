@@ -17,7 +17,7 @@ pub(crate) struct Config {
     #[serde(alias = "liveupdatesws")]
     pub(crate) live_updates_ws: bool,
     #[serde(default)]
-    pub(crate) terrain_chunk_only: bool,
+    pub(crate) terrain_chunk_state_only: bool,
 }
 
 impl Default for Config {
@@ -31,7 +31,7 @@ impl Default for Config {
             spacetimedb: SpacetimeDbConfig::default(),
             origins: AllowedOriginConfig::default(),
             live_updates_ws: false,
-            terrain_chunk_only: false,
+            terrain_chunk_state_only: false,
         }
     }
 }
@@ -151,7 +151,7 @@ pub(crate) struct CliConfigParameters {
     pub(crate) storage_path: Option<String>,
     pub(crate) config_path: Option<String>,
     pub(crate) live_updates_ws: Option<bool>,
-    pub(crate) terrain_chunk_only: Option<bool>,
+    pub(crate) terrain_chunk_state_only: Option<bool>,
 }
 
 impl Config {
@@ -192,9 +192,11 @@ impl Config {
                 cli_overrides = cli_overrides.set_default("live_updates_ws", live_updates_ws)?;
             }
 
-            if let Some(terrain_chunk_only) = cli_config_parameters.terrain_chunk_only {
-                cli_overrides =
-                    cli_overrides.set_default("terrain_chunk_only", terrain_chunk_only)?;
+            if let Some(terrain_chunk_state_only) =
+                cli_config_parameters.terrain_chunk_state_only
+            {
+                cli_overrides = cli_overrides
+                    .set_default("terrain_chunk_state_only", terrain_chunk_state_only)?;
             }
 
             config.add_source(cli_overrides.build()?)
