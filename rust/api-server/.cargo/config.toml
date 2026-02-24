@@ -1,3 +1,7 @@
 [build]
-target = "x86_64-pc-windows-msvc"[env]
+target = "x86_64-pc-windows-msvc"
 TS_RS_EXPORT_DIR = { value = "../../frontend/app/types", relative = true }
+
+
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
