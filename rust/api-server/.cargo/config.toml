@@ -1,2 +1,3 @@
-[env]
+[build]
+target = "x86_64-pc-windows-msvc"[env]
 TS_RS_EXPORT_DIR = { value = "../../frontend/app/types", relative = true }

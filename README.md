@@ -52,6 +52,16 @@ bun run .output/server/index.mjs
 
 We are using **Rust** for the frontend part which can be found in the rust/api-server folder.
 
+### Windows note
+
+On Windows, use the **MSVC** Rust target/toolchain (not `windows-gnu`) to avoid native C build failures in crates such as `ring` and `blake3`.
+
+```bash
+rustup toolchain install stable-x86_64-pc-windows-msvc
+rustup default stable-x86_64-pc-windows-msvc
+rustup target add x86_64-pc-windows-msvc
+```
+
 To get the default config you can run the command bellow.
 
 ```bash
