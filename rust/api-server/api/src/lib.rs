@@ -28,6 +28,7 @@ mod traveler_tasks;
 mod user_state;
 mod vault_state;
 mod websocket;
+mod terrain_chunk_state;
 
 use crate::config::Config;
 use crate::leaderboard::{
@@ -421,6 +422,7 @@ fn create_app(config: &Config, state: AppState, prometheus: PrometheusHandle) ->
         // )
         .route("/items", axum_codec::routing::get(items::list_items).into())
         .merge(player_state::get_routes())
+        .merge(terrain_chunk_state::get_routes())
         .merge(claims::get_routes())
         .merge(buildings::get_routes())
         .merge(inventory::get_routes())
@@ -1235,6 +1237,9 @@ you should provide the directory of that submodule.",
 
         #[arg(long, help = "Live updates")]
         live_updates_ws: Option<bool>,
+
+        #[arg(long, help = "Only update terrain_chunk_state")]
+        terrain_chunk_only: Option<bool>,
     },
     PrintConfig {
         #[arg(long, help = "Format to print the config", default_value = "json", value_parser = ["yml","yaml","json","toml"])]
@@ -1266,11 +1271,13 @@ pub async fn main() -> anyhow::Result<()> {
             host,
             storage_path,
             live_updates_ws,
+            terrain_chunk_only,
         } => {
             cli_config_parameters.host = host.clone();
             cli_config_parameters.port = *port;
             cli_config_parameters.storage_path = storage_path.clone();
             cli_config_parameters.live_updates_ws = *live_updates_ws;
+            cli_config_parameters.terrain_chunk_only = *terrain_chunk_only;
         }
     }
 

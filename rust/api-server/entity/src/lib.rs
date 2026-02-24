@@ -35,6 +35,7 @@ pub mod player_username_state;
 pub mod raw_event_data;
 pub mod shared;
 pub mod skill_desc;
+pub mod terrain_chunk_state;
 pub mod trade_order;
 pub mod traveler_task_desc;
 pub mod traveler_task_state;

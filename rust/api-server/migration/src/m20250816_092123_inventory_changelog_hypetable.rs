@@ -11,7 +11,18 @@ impl MigrationTrait for Migration {
 
         let stmt = Statement::from_string(
             manager.get_database_backend(),
-            "ALTER TABLE inventory_changelog DROP CONSTRAINT inventory_changelog_pkey;".to_string(),
+            "DO $$\n"
+                .to_string()
+                + "DECLARE pk_name text;\n"
+                + "BEGIN\n"
+                + "  SELECT conname INTO pk_name\n"
+                + "  FROM pg_constraint\n"
+                + "  WHERE conrelid = 'inventory_changelog'::regclass\n"
+                + "    AND contype = 'p';\n"
+                + "  IF pk_name IS NOT NULL THEN\n"
+                + "    EXECUTE format('ALTER TABLE inventory_changelog DROP CONSTRAINT %I', pk_name);\n"
+                + "  END IF;\n"
+                + "END $$;",
         );
 
         db.execute(stmt).await?;

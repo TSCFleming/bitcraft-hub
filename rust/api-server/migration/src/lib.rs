@@ -28,6 +28,9 @@ mod m20250721_155813_add_region_to_state_data;
 mod m20250816_092123_inventory_changelog_hypetable;
 mod m20250816_105212_inventory_changelog_hypetable_compression;
 mod m20250819_160231_add_two_now_field_to_collectible_desc;
+mod m20250820_101500_inventory_changelog_id_default;
+mod m20260207_053010_terrain_state_map;
+
 
 pub struct Migrator;
 
@@ -63,6 +66,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20250816_092123_inventory_changelog_hypetable::Migration),
             Box::new(m20250816_105212_inventory_changelog_hypetable_compression::Migration),
             Box::new(m20250819_160231_add_two_now_field_to_collectible_desc::Migration),
+            Box::new(m20250820_101500_inventory_changelog_id_default::Migration),
+            Box::new(m20260207_053010_terrain_state_map::Migration),
         ]
     }
 }
