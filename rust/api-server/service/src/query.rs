@@ -11,6 +11,7 @@ use ::entity::extraction_recipe_desc;
 use ::entity::inventory;
 use ::entity::inventory_changelog;
 use ::entity::inventory_changelog::ItemType;
+use ::entity::terrain_chunk_state;
 use ::entity::resource_desc;
 use ::entity::trade_order;
 use ::entity::traveler_task_state;
@@ -160,6 +161,20 @@ impl Query {
         let num_pages = paginator.num_items_and_pages().await?;
 
         // Fetch paginated posts
+        paginator.fetch_page(page - 1).await.map(|p| (p, num_pages))
+    }
+
+    pub async fn find_terrain_chunks(
+        db: &DbConn,
+        page: u64,
+        per_page: u64,
+    ) -> Result<(Vec<terrain_chunk_state::Model>, ItemsAndPagesNumber), DbErr> {
+        let paginator = terrain_chunk_state::Entity::find()
+            .order_by_asc(terrain_chunk_state::Column::ChunkIndex)
+            .paginate(db, per_page);
+
+        let num_pages = paginator.num_items_and_pages().await?;
+
         paginator.fetch_page(page - 1).await.map(|p| (p, num_pages))
     }
 

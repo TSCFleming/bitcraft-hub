@@ -41,6 +41,7 @@ mod m20260212_000004_fix_location_state_types;
 mod m20260212_000005_add_region_to_location_state;
 mod m20260216_000001_create_resource_tables;
 
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
