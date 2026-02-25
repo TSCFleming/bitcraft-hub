@@ -1,0 +1,10 @@
+[package]
+name = "temp_bindings_gen"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+spacetimedb-sdk = "2.0.1"
+
+[lib]
+crate-type = ["cdylib"]

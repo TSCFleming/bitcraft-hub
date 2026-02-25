@@ -751,12 +751,22 @@ async fn connect_to_db_logic(
             }
 
             let tmp_database_name_arc = database_name_arc.clone();
-            let building_desc = ctx.db.building_desc().iter().collect::<Vec<_>>();
-            if !building_desc.is_empty() {
-                let _ = tmp_building_desc_tx.send(SpacetimeUpdateMessages::Initial {
-                    database_name: tmp_database_name_arc.clone(),
-                    data: building_desc,
-                });
+            // Wrap in catch_unwind to handle schema mismatch errors gracefully
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ctx.db.building_desc().iter().collect::<Vec<_>>()
+            })) {
+                Ok(building_desc) if !building_desc.is_empty() => {
+                    let _ = tmp_building_desc_tx.send(SpacetimeUpdateMessages::Initial {
+                        database_name: tmp_database_name_arc.clone(),
+                        data: building_desc,
+                    });
+                }
+                Ok(_) => {
+                    tracing::debug!("building_desc table is empty");
+                }
+                Err(_) => {
+                    tracing::warn!("Failed to parse building_desc table - schema mismatch, skipping");
+                }
             }
 
             let tmp_database_name_arc = database_name_arc.clone();
@@ -1016,7 +1026,7 @@ async fn connect_to_db_logic(
                 });
             }
 
-            let tmp_database_name_arc = database_name_arc.clone();
+            let _tmp_database_name_arc = database_name_arc.clone();
 
             // for resource_desc in ctx.db.user_state().iter() {
             //     if resource_desc.entity_id == 504403158285774600 {
@@ -1169,7 +1179,7 @@ pub fn start_websocket_bitcraft_logic(config: Config, global_app_state: AppState
                 let tmp_claim_tech_desc_tx = claim_tech_desc_tx.clone();
                 let tmp_building_state_tx = building_state_tx.clone();
                 let tmp_building_desc_tx = building_desc_tx.clone();
-                let tmp_location_state_tx = location_state_tx.clone();
+                let _tmp_location_state_tx = location_state_tx.clone();
                 let tmp_building_nickname_state_tx = building_nickname_state_tx.clone();
                 let tmp_crafting_recipe_desc_tx = crafting_recipe_desc_tx.clone();
                 let tmp_item_list_desc_tx = item_list_desc_tx.clone();

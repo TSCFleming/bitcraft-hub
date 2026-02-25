@@ -39,7 +39,7 @@ pub(crate) fn start_worker_resource_desc(
                         match msg {
                             SpacetimeUpdateMessages::Initial { data, .. } => {
                                 let mut local_messages = Vec::with_capacity(batch_size + 10);
-                                let currently_known = ::entity::resource_desc::Entity::find()
+                                let _currently_known = ::entity::resource_desc::Entity::find()
                                     .all(&global_app_state.conn)
                                     .await
                                     .map_or(vec![], |aa| aa)

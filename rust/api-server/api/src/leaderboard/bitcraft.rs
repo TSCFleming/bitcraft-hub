@@ -114,7 +114,7 @@ pub(crate) fn start_worker_experience_state(
 
                                     for chunk_ids in currently_known_experience_state.into_keys().collect::<Vec<_>>().chunks(100) {
                                         let mut query = sea_query::Condition::any();
-                                        for chunk_id in chunk_ids {
+                                        for _chunk_id in chunk_ids {
                                         let (entity_id,skill_id) = chunk_ids.first().unwrap().split_once(":").unwrap();
                                             query = query.add(::entity::experience_state::Column::EntityId.eq(entity_id.parse::<i64>().unwrap())
                                             .and(::entity::experience_state::Column::SkillId.eq(skill_id.parse::<i32>().unwrap())));

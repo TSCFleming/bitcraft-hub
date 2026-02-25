@@ -16,7 +16,6 @@ pub struct Model {
     pub destination_x: i32,
     pub destination_z: i32,
     pub dimension: u32,
-    pub is_running: bool,
     pub region: String,
 }
 
@@ -32,7 +31,6 @@ pub struct ModelBuilder {
     destination_x: i32,
     destination_z: i32,
     dimension: u32,
-    is_running: bool,
     region: String,
 }
 
@@ -47,7 +45,6 @@ impl ModelBuilder {
             destination_x: value.destination_x,
             destination_z: value.destination_z,
             dimension: value.dimension,
-            is_running: value.is_running,
             region: String::new(),
         }
     }
@@ -67,7 +64,6 @@ impl ModelBuilder {
             destination_x: self.destination_x,
             destination_z: self.destination_z,
             dimension: self.dimension,
-            is_running: self.is_running,
             region: self.region,
         }
     }

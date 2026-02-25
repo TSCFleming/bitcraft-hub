@@ -41,6 +41,7 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
+                    .if_not_exists()
                     .name("experience_state_entity_id_skill_id")
                     .table(ExperienceState::Table)
                     .col(ExperienceState::EntityId)
