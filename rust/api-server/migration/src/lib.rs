@@ -40,6 +40,7 @@ mod m20260212_000003_add_indices;
 mod m20260212_000004_fix_location_state_types;
 mod m20260212_000005_add_region_to_location_state;
 mod m20260216_000001_create_resource_tables;
+mod m20260226_000001_ensure_terrain_chunk_state_table;
 
 
 pub struct Migrator;
@@ -88,6 +89,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260212_000004_fix_location_state_types::Migration),
             Box::new(m20260212_000005_add_region_to_location_state::Migration),
             Box::new(m20260216_000001_create_resource_tables::Migration),
+            Box::new(m20260226_000001_ensure_terrain_chunk_state_table::Migration),
         ]
     }
 }
