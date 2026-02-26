@@ -15,3 +15,5 @@ plotters = "0.3"
 postgres = "0.19"
 serde_json = "1.0"
 eframe = "0.31"
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
