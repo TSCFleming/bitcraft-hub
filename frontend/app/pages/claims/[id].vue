@@ -14,11 +14,18 @@ import type { InventoryChangelog } from "~/types/InventoryChangelog";
 import type { ItemCargo } from "~/types/ItemCargo";
 import type { TravelerTaskDesc } from "~/types/TravelerTaskDesc";
 import type { ItemsAndCargollResponse } from "~/types/ItemsAndCargollResponse";
+import type { HouseOwnersByClaimResponse } from "~/types/HouseOwnersByClaimResponse";
 import InventoryImg from "~/components/Bitcraft/InventoryImg.vue";
 
 const {
   public: { iconDomain },
 } = useRuntimeConfig();
+
+type BitjitaPlayerLastSeen = {
+  username: string | null;
+  signedIn: boolean;
+  lastLoginTimestamp: string | null;
+};
 
 const page = ref(1);
 const buildingItemsPage = ref(1);
@@ -63,6 +70,112 @@ const { data: claimFetch } =
     },
     { deep: true },
   );
+
+const { data: houseOwnersByClaimFetch, pending: houseOwnersByClaimPending } =
+  useFetchMsPack<HouseOwnersByClaimResponse>(() => {
+    return `/api/bitcraft/houses/by_claim/${route.params.id.toString()}/owners`;
+  });
+
+const houseOwnerPlayerData = ref<Record<string, BitjitaPlayerLastSeen | null>>(
+  {},
+);
+
+const fetchPlayerByEntityId = async (
+  entityId: bigint,
+): Promise<BitjitaPlayerLastSeen | null> => {
+  try {
+    return await $fetch<BitjitaPlayerLastSeen>(
+      `/api/bitjita/players/${entityId.toString()}`,
+    );
+  } catch (error) {
+    console.error("Failed to fetch Bitjita player for house owner", entityId, error);
+    return null;
+  }
+};
+
+const getLastLoginSortValue = (
+  playerData: BitjitaPlayerLastSeen | null | undefined,
+) => {
+  // Online players are considered the most recent activity.
+  if (playerData?.signedIn) {
+    return -1;
+  }
+
+  if (!playerData?.lastLoginTimestamp) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const normalizedTimestamp = playerData.lastLoginTimestamp
+    .replace(" ", "T")
+    .replace(/\+00$/, "Z");
+  const lastLoginDate = new Date(normalizedTimestamp);
+
+  if (Number.isNaN(lastLoginDate.getTime())) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Math.max(0, Math.floor((now.now.value.getTime() - lastLoginDate.getTime()) / 1000));
+};
+
+watch(
+  () => houseOwnersByClaimFetch.value?.owners ?? [],
+  async (owners) => {
+    const missingOwners = owners.filter((owner) => {
+      const key = owner.owner_entity_id.toString();
+      return houseOwnerPlayerData.value[key] === undefined;
+    });
+
+    if (!missingOwners.length) {
+      return;
+    }
+
+    await Promise.all(
+      missingOwners.map(async (owner) => {
+        const key = owner.owner_entity_id.toString();
+        houseOwnerPlayerData.value[key] = await fetchPlayerByEntityId(
+          owner.owner_entity_id,
+        );
+      }),
+    );
+  },
+  { immediate: true },
+);
+
+const formatEvictionCountdown = (countdownSeconds: bigint | null | undefined): string => {
+  if (countdownSeconds === null || countdownSeconds === undefined) {
+    return "Resident";
+  }
+
+  const seconds = Number(countdownSeconds);
+  if (seconds <= 0) {
+    return "Evicting now";
+  }
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  const parts = [];
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
+
+  return `${parts.join(" ")} until eviction`;
+};
+
+const claimHouseOwnersRows = computed(() => {
+  return (houseOwnersByClaimFetch.value?.owners ?? []).map((owner) => {
+    const key = owner.owner_entity_id.toString();
+    const player = houseOwnerPlayerData.value[key];
+
+    return {
+      ...owner,
+      owner_name: owner.owner_username ?? player?.username ?? key,
+      last_login_sort: getLastLoginSortValue(player),
+      eviction_countdown_display: formatEvictionCountdown(owner.eviction_countdown_seconds),
+    };
+  });
+});
 
 const { data: trevelerTasksFetch } = useFetchMsPack<{
   [key: number]: TravelerTaskDesc;
@@ -412,6 +525,49 @@ const onlinePlayersCount = computed(() => {
 
 const now = useNow({ interval: 1000, controls: true });
 
+const formatLastLoginAgo = (
+  playerData: BitjitaPlayerLastSeen | null | undefined,
+) => {
+  if (playerData === undefined) {
+    return "Loading...";
+  }
+
+  if (playerData === null) {
+    return "Fetch failed";
+  }
+
+  if (playerData.signedIn) {
+    return "Online now";
+  }
+
+  if (!playerData.lastLoginTimestamp) {
+    return "Unknown";
+  }
+
+  // Bitjita returns timestamps like `2026-03-28 02:01:12+00`.
+  const normalizedTimestamp = playerData.lastLoginTimestamp
+    .replace(" ", "T")
+    .replace(/\+00$/, "Z");
+  const lastLoginDate = new Date(normalizedTimestamp);
+
+  if (Number.isNaN(lastLoginDate.getTime())) {
+    return "Unknown";
+  }
+
+  const diffSeconds = Math.max(
+    0,
+    Math.floor((now.now.value.getTime() - lastLoginDate.getTime()) / 1000),
+  );
+
+  const formatted = secondsToDaysMinutesSecondsFormat(diffSeconds).trim();
+
+  if (!formatted) {
+    return "just now";
+  }
+
+  return `${formatted} ago`;
+};
+
 const researchEnded = computed(() => {
   return new Date(
     new Date(
@@ -570,6 +726,7 @@ watchThrottled(
               v-model="tab"
           >
             <v-tab value="members">Members</v-tab>
+            <v-tab value="housing_owners">Housing Owners</v-tab>
             <v-tab value="building_items">Building items ({{ inventorysBuildings.length || 0 }})</v-tab>
             <v-tab value="player_items">Player items ({{ inventorysPlayers.length || 0 }})</v-tab>
             <v-tab value="player_offline_items">Player Offline items ({{
@@ -890,6 +1047,70 @@ watchThrottled(
                             </div>
                           </v-chip>
                         </div>
+                      </template>
+                    </v-data-table>
+                  </v-card-text>
+                </v-card>
+              </v-tabs-window-item>
+
+              <v-tabs-window-item value="housing_owners">
+                <v-card height="100%">
+                  <v-card-title class="d-flex align-center pe-2">
+                    Housing Owners ({{ claimHouseOwnersRows.length }})
+                    <v-spacer></v-spacer>
+                    <v-progress-circular
+                      v-if="houseOwnersByClaimPending"
+                      indeterminate
+                      size="20"
+                    ></v-progress-circular>
+                  </v-card-title>
+                  <v-card-text>
+                    <v-data-table
+                      hover
+                      density="compact"
+                      :headers="[
+                        {
+                          title: 'Player',
+                          key: 'owner_name',
+                          fixed: 'start',
+                          cellProps: {
+                            class: 'font-weight-black'
+                          }
+                        },
+                        {
+                          title: 'Building Name',
+                          key: 'building_name'
+                        },
+                        {
+                          title: 'Housing Status',
+                          key: 'eviction_countdown_display'
+                        },
+                        {
+                          title: 'Last Login',
+                          key: 'last_login_sort'
+                        }
+                      ]"
+                      :items="claimHouseOwnersRows"
+                      :items-per-page="15"
+                      :items-per-page-options="[15, 25, 50]"
+                      class="elevation-1"
+                    >
+                      <template #item.owner_name="{ item }">
+                        <nuxt-link
+                          class="text-decoration-none text-high-emphasis"
+                          :to="{ name: 'players-id', params: { id: item.owner_entity_id.toString() } }"
+                        >
+                          {{ item.owner_name }}
+                        </nuxt-link>
+                      </template>
+                      <template #item.building_name="{ item }">
+                        {{ item.building_name }}
+                      </template>
+                      <template #item.eviction_countdown_display="{ item }">
+                        {{ item.eviction_countdown_display }}
+                      </template>
+                      <template #item.last_login_sort="{ item }">
+                        {{ formatLastLoginAgo(houseOwnerPlayerData[item.owner_entity_id.toString()]) }}
                       </template>
                     </v-data-table>
                   </v-card-text>

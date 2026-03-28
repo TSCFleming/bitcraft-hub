@@ -7,8 +7,29 @@ export function useLazyFetchMsPack<DataT, ErrorT = undefined>(
     public: { api },
   } = useRuntimeConfig();
   const [request, options] = args;
+
+  const baseURL = (() => {
+    const configured = (api.base ?? "").trim();
+    if (!configured) {
+      return undefined;
+    }
+
+    if (import.meta.client) {
+      const hostname = window.location.hostname;
+      const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
+      const pointsToLocalhost =
+        configured.includes("localhost") || configured.includes("127.0.0.1");
+
+      if (!isLocalHost && pointsToLocalhost) {
+        return undefined;
+      }
+    }
+
+    return configured;
+  })();
+
   return useLazyFetch<DataT, ErrorT>(request, {
-    baseURL: api.base,
+    baseURL,
     ...options,
     headers: {
       Accept: "application/vnd.msgpack",

@@ -19,8 +19,62 @@ export const useWebsocketStore = defineStore("websocket", () => {
     public: { api },
   } = useRuntimeConfig();
 
+  const websocketBase = (() => {
+    const configuredRaw = (api.websocket ?? "").trim();
+
+    const normalizeToWsBase = (value: string): string => {
+      if (!value) {
+        if (!import.meta.client) {
+          return "";
+        }
+        const isSecure = window.location.protocol === "https:";
+        return `${isSecure ? "wss" : "ws"}://${window.location.host}`;
+      }
+
+      if (value.startsWith("wss://") || value.startsWith("ws://")) {
+        return value;
+      }
+
+      if (value.startsWith("https://")) {
+        return `wss://${value.slice("https://".length)}`;
+      }
+      if (value.startsWith("http://")) {
+        return `ws://${value.slice("http://".length)}`;
+      }
+
+      // If someone passes a bare host like "bcmap.art".
+      if (!value.includes("://")) {
+        if (import.meta.client) {
+          const isSecure = window.location.protocol === "https:";
+          return `${isSecure ? "wss" : "ws"}://${value}`;
+        }
+
+        return `ws://${value}`;
+      }
+
+      return value;
+    };
+
+    const normalized = normalizeToWsBase(configuredRaw);
+
+    if (import.meta.client) {
+      const hostname = window.location.hostname;
+      const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
+      const pointsToLocalhost =
+        normalized.includes("localhost") || normalized.includes("127.0.0.1");
+
+      // If you accidentally ship a localhost WS base to prod, prefer same-origin.
+      if (!isLocalHost && pointsToLocalhost) {
+        const isSecure = window.location.protocol === "https:";
+        return `${isSecure ? "wss" : "ws"}://${window.location.host}`;
+      }
+    }
+
+    return normalized;
+  })();
+
   const { send, status, close, open } = useWebSocket(
-    `${api.websocket}/websocket?encoding=MessagePack`,
+    `${websocketBase}/websocket?encoding=MessagePack`,
     {
       onMessage: handleMessage,
       autoReconnect: {

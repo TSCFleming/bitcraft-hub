@@ -14,10 +14,12 @@ use crate::collectible_desc::bitcraft::start_worker_collectible_desc;
 use crate::config::Config;
 use crate::crafting_recipe_desc::bitcraft::start_worker_crafting_recipe_desc;
 use crate::deployable_state::bitcraft::start_worker_deployable_state;
+use crate::empire_chunk_state::bitcraft::start_worker_empire_chunk_state;
 use crate::extraction_recipe_desc::bitcraft::start_worker_extraction_recipe_desc;
 use crate::houses::bitcraft::{
     start_worker_dimension_description_state, start_worker_interior_network_desc,
     start_worker_permission_state, start_worker_player_housing_state, start_worker_portal_state,
+    start_worker_player_housing_evict_player_timer,
 };
 use crate::inventory::bitcraft::start_worker_inventory_state;
 use crate::item_list_desc::bitcraft::start_worker_item_list_desc;
@@ -25,6 +27,7 @@ use crate::items::bitcraft::start_worker_item_desc;
 use crate::leaderboard::bitcraft::start_worker_experience_state;
 use crate::location_state::bitcraft::start_worker_location_state;
 use crate::resource_desc::bitcraft::start_worker_resource_desc;
+use crate::resource_state::bitcraft::start_worker_resource_state;
 
 use crate::mobile_entity_state::bitcraft::start_worker_mobile_entity_state;
 use crate::npc_desc::bitcraft::start_worker_npc_desc;
@@ -373,7 +376,10 @@ async fn connect_to_db_logic(
     portal_state_tx: &UnboundedSender<SpacetimeUpdateMessages<PortalState>>,
     location_state_tx: &UnboundedSender<SpacetimeUpdateMessages<LocationState>>,
     resource_desc_tx: &UnboundedSender<SpacetimeUpdateMessages<ResourceDesc>>,
+    resource_state_tx: &UnboundedSender<SpacetimeUpdateMessages<ResourceState>>,
+    empire_chunk_state_tx: &UnboundedSender<SpacetimeUpdateMessages<EmpireChunkState>>,
     extraction_recipe_desc_tx: &UnboundedSender<SpacetimeUpdateMessages<ExtractionRecipeDesc>>,
+    player_housing_evict_player_timer_tx: &UnboundedSender<SpacetimeUpdateMessages<PlayerHousingEvictPlayerTimer>>,
 ) -> anyhow::Result<()> {
     let ctx = connect_to_db(
         global_app_state.clone(),
@@ -591,11 +597,26 @@ async fn connect_to_db_logic(
         database
     );
     setup_spacetime_db_listeners!(ctx, resource_desc, resource_desc_tx, ResourceDesc, database);
+    setup_spacetime_db_listeners!(ctx, resource_state, resource_state_tx, ResourceState, database);
+    setup_spacetime_db_listeners!(
+        ctx,
+        empire_chunk_state,
+        empire_chunk_state_tx,
+        EmpireChunkState,
+        database
+    );
     setup_spacetime_db_listeners!(
         ctx,
         extraction_recipe_desc,
         extraction_recipe_desc_tx,
         ExtractionRecipeDesc,
+        database
+    );
+    setup_spacetime_db_listeners!(
+        ctx,
+        player_housing_evict_player_timer,
+        player_housing_evict_player_timer_tx,
+        PlayerHousingEvictPlayerTimer,
         database
     );
 
@@ -626,6 +647,8 @@ async fn connect_to_db_logic(
         "inventory_state",
         "claim_tech_desc",
         "resource_desc",
+        "resource_state",
+        "empire_chunk_state",
         "extraction_recipe_desc",
         "identity_role",
         // "claim_description_state", -> claim_state
@@ -643,6 +666,7 @@ async fn connect_to_db_logic(
         "interior_network_desc",
         "dimension_description_state",
         "player_housing_state",
+        "player_housing_evict_player_timer",
         "permission_state",
         "portal_state",
     ];
@@ -650,6 +674,7 @@ async fn connect_to_db_logic(
     let sql_subscribe = vec![
         "SELECT location_state.* FROM location_state JOIN building_state ON location_state.entity_id = building_state.entity_id",
         "SELECT location_state.* FROM location_state JOIN portal_state ON location_state.entity_id = portal_state.entity_id",
+        "SELECT location_state.* FROM location_state JOIN resource_state ON location_state.entity_id = resource_state.entity_id",
         "SELECT mobile_entity_state.* FROM mobile_entity_state JOIN player_state ON mobile_entity_state.entity_id = player_state.entity_id",
     ];
 
@@ -687,9 +712,12 @@ async fn connect_to_db_logic(
     let tmp_interior_network_desc_tx = interior_network_desc_tx.clone();
     let tmp_dimension_description_state_tx = dimension_description_state_tx.clone();
     let tmp_player_housing_state_tx = player_housing_state_tx.clone();
+    let tmp_player_housing_evict_player_timer_tx = player_housing_evict_player_timer_tx.clone();
     let tmp_permission_state_tx = permission_state_tx.clone();
     let tmp_portal_state_tx = portal_state_tx.clone();
     let tmp_resource_desc_tx = resource_desc_tx.clone();
+    let tmp_resource_state_tx = resource_state_tx.clone();
+    let tmp_empire_chunk_state_tx = empire_chunk_state_tx.clone();
     let tmp_extraction_recipe_desc_tx = extraction_recipe_desc_tx.clone();
 
     ctx.subscription_builder()
@@ -713,6 +741,21 @@ async fn connect_to_db_logic(
                     database_name: tmp_database_name_arc.clone(),
                     data: player_username_state,
                 });
+            }
+
+            let tmp_database_name_arc = database_name_arc.clone();
+            let player_housing_evict_player_timer = ctx
+                .db
+                .player_housing_evict_player_timer()
+                .iter()
+                .collect::<Vec<_>>();
+            if !player_housing_evict_player_timer.is_empty() {
+                let _ = tmp_player_housing_evict_player_timer_tx.send(
+                    SpacetimeUpdateMessages::Initial {
+                        database_name: tmp_database_name_arc.clone(),
+                        data: player_housing_evict_player_timer,
+                    },
+                );
             }
 
             let tmp_database_name_arc = database_name_arc.clone();
@@ -830,6 +873,24 @@ async fn connect_to_db_logic(
                 let _ = tmp_resource_desc_tx.send(SpacetimeUpdateMessages::Initial {
                     database_name: tmp_database_name_arc.clone(),
                     data: resource_desc,
+                });
+            }
+
+            let tmp_database_name_arc = database_name_arc.clone();
+            let resource_state = ctx.db.resource_state().iter().collect::<Vec<_>>();
+            if !resource_state.is_empty() {
+                let _ = tmp_resource_state_tx.send(SpacetimeUpdateMessages::Initial {
+                    database_name: tmp_database_name_arc.clone(),
+                    data: resource_state,
+                });
+            }
+
+            let tmp_database_name_arc = database_name_arc.clone();
+            let empire_chunk_state = ctx.db.empire_chunk_state().iter().collect::<Vec<_>>();
+            if !empire_chunk_state.is_empty() {
+                let _ = tmp_empire_chunk_state_tx.send(SpacetimeUpdateMessages::Initial {
+                    database_name: tmp_database_name_arc.clone(),
+                    data: empire_chunk_state,
                 });
             }
 
@@ -1153,7 +1214,11 @@ pub fn start_websocket_bitcraft_logic(config: Config, global_app_state: AppState
         let (portal_state_tx, portal_state_rx) = tokio::sync::mpsc::unbounded_channel();
         let (location_state_tx, location_state_rx) = tokio::sync::mpsc::unbounded_channel();
         let (resource_desc_tx, resource_desc_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (resource_state_tx, resource_state_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (empire_chunk_state_tx, empire_chunk_state_rx) = tokio::sync::mpsc::unbounded_channel();
         let (extraction_recipe_desc_tx, extraction_recipe_desc_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+        let (player_housing_evict_player_timer_tx, player_housing_evict_player_timer_rx) =
             tokio::sync::mpsc::unbounded_channel();
 
         let mut remove_desc = false;
@@ -1215,7 +1280,10 @@ pub fn start_websocket_bitcraft_logic(config: Config, global_app_state: AppState
                 let tmp_portal_state_tx = portal_state_tx.clone();
                 let tmp_location_state_tx = location_state_tx.clone();
                 let tmp_resource_desc_tx = resource_desc_tx.clone();
+                let tmp_resource_state_tx = resource_state_tx.clone();
+                let tmp_empire_chunk_state_tx = empire_chunk_state_tx.clone();
                 let tmp_extraction_recipe_desc_tx = extraction_recipe_desc_tx.clone();
+                let tmp_player_housing_evict_player_timer_tx = player_housing_evict_player_timer_tx.clone();
                 let tmp_conf = config.clone();
                 let tmp_global_app_state = global_app_state.clone();
                 let tmp_remove_desc = remove_desc;
@@ -1274,7 +1342,10 @@ pub fn start_websocket_bitcraft_logic(config: Config, global_app_state: AppState
                             &tmp_portal_state_tx,
                             &tmp_location_state_tx,
                             &tmp_resource_desc_tx,
+                            &tmp_resource_state_tx,
+                            &tmp_empire_chunk_state_tx,
                             &tmp_extraction_recipe_desc_tx,
+                            &tmp_player_housing_evict_player_timer_tx,
                         )
                             .await;
 
@@ -1537,11 +1608,27 @@ pub fn start_websocket_bitcraft_logic(config: Config, global_app_state: AppState
             3000,
             Duration::from_millis(50),
         );
+        start_worker_resource_state(
+            global_app_state.clone(),
+            resource_state_rx,
+            3000,
+            Duration::from_millis(50),
+        );
+        start_worker_empire_chunk_state(
+            global_app_state.clone(),
+            empire_chunk_state_rx,
+            3000,
+            Duration::from_millis(50),
+        );
         start_worker_extraction_recipe_desc(
             global_app_state.clone(),
             extraction_recipe_desc_rx,
             3000,
             Duration::from_millis(50),
+        );
+        start_worker_player_housing_evict_player_timer(
+            global_app_state.clone(),
+            player_housing_evict_player_timer_rx,
         );
     });
 }

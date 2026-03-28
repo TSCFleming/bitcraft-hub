@@ -8,9 +8,30 @@ export function useFetchMsPack<DataT, ErrorT = undefined>(
   } = useRuntimeConfig();
   const [request, options] = args;
 
+  const baseURL = (() => {
+    const configured = (api.base ?? "").trim();
+    if (!configured) {
+      return undefined;
+    }
+
+    if (import.meta.client) {
+      const hostname = window.location.hostname;
+      const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
+      const pointsToLocalhost =
+        configured.includes("localhost") || configured.includes("127.0.0.1");
+
+      // If you accidentally ship a localhost API base to prod, prefer same-origin.
+      if (!isLocalHost && pointsToLocalhost) {
+        return undefined;
+      }
+    }
+
+    return configured;
+  })();
+
   // @ts-ignore
   return useFetch<DataT, ErrorT>(request, {
-    baseURL: api.base,
+    baseURL,
     ...options,
     headers: {
       Accept: "application/vnd.msgpack",

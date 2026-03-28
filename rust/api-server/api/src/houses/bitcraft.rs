@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::websocket::SpacetimeUpdateMessages;
 use game_module::module_bindings::{
     DimensionDescriptionState, InteriorNetworkDesc, PermissionState, PlayerHousingState,
-    PortalState,
+    PortalState, PlayerHousingEvictPlayerTimer,
 };
 use migration::{OnConflict, sea_query};
 use sea_orm::{
@@ -705,4 +705,58 @@ async fn insert_many_portal_state(
 
     messages.clear();
     Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Player Housing Evict Player Timer Worker
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(crate) fn start_worker_player_housing_evict_player_timer(
+    global_app_state: AppState,
+    mut rx: UnboundedReceiver<SpacetimeUpdateMessages<PlayerHousingEvictPlayerTimer>>,
+) {
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                SpacetimeUpdateMessages::Initial { data, .. } => {
+                    // Load all eviction timers into the cache
+                    for timer in data {
+                        global_app_state
+                            .eviction_timers
+                            .insert(
+                                (
+                                    timer.building_entity_id as i64,
+                                    timer.player_entity_id as i64,
+                                ),
+                                timer,
+                            );
+                    }
+                }
+                SpacetimeUpdateMessages::Insert { new, .. } => {
+                    global_app_state
+                        .eviction_timers
+                        .insert(
+                            (new.building_entity_id as i64, new.player_entity_id as i64),
+                            new,
+                        );
+                }
+                SpacetimeUpdateMessages::Update { new, .. } => {
+                    global_app_state
+                        .eviction_timers
+                        .insert(
+                            (new.building_entity_id as i64, new.player_entity_id as i64),
+                            new,
+                        );
+                }
+                SpacetimeUpdateMessages::Remove { delete, .. } => {
+                    global_app_state
+                        .eviction_timers
+                        .remove(&(
+                            delete.building_entity_id as i64,
+                            delete.player_entity_id as i64,
+                        ));
+                }
+            }
+        }
+    });
 }

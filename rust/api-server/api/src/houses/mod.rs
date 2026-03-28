@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing;
 use ts_rs::TS;
+use spacetimedb_sdk::ScheduleAt;
 
 pub(crate) fn get_routes() -> AppRouter {
     Router::new()
@@ -24,6 +25,14 @@ pub(crate) fn get_routes() -> AppRouter {
         .route(
             "/api/bitcraft/houses/by_owner/{id}",
             axum_codec::routing::get(find_houses_by_owner_id).into(),
+        )
+        .route(
+            "/houses/by_claim/{id}/owners",
+            axum_codec::routing::get(find_house_owners_by_claim_id).into(),
+        )
+        .route(
+            "/api/bitcraft/houses/by_claim/{id}/owners",
+            axum_codec::routing::get(find_house_owners_by_claim_id).into(),
         )
         .route("/houses/{id}", axum_codec::routing::get(find_house).into())
         .route(
@@ -94,6 +103,24 @@ pub(crate) struct HouseInventoriesResponse {
     pub house_entity_id: i64,
     pub dimension_id: Option<i64>,
     pub inventories: Vec<entity::inventory::ResolvedInventory>,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export)]
+pub(crate) struct HouseOwnerByClaimEntry {
+    pub owner_entity_id: i64,
+    pub owner_username: Option<String>,
+    pub building_entity_id: i64,
+    pub building_name: String,
+    pub eviction_countdown_seconds: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export)]
+pub(crate) struct HouseOwnersByClaimResponse {
+    pub claim_entity_id: i64,
+    pub owners: Vec<HouseOwnerByClaimEntry>,
+    pub total_housed_buildings: u64,
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
@@ -187,6 +214,148 @@ pub(crate) async fn find_houses_by_owner_id(
     }
 
     Ok(axum_codec::Codec(response))
+}
+
+/// GET /houses/by_claim/{id}/owners
+///
+/// Returns a list of house owners in the claim, one row per building.
+/// Includes building name and eviction status.
+pub(crate) async fn find_house_owners_by_claim_id(
+    State(state): State<AppState>,
+    Path(claim_id): Path<i64>,
+) -> Result<axum_codec::Codec<HouseOwnersByClaimResponse>, (StatusCode, &'static str)> {
+    let claim_building_ids = ::entity::building_state::Entity::find()
+        .select_only()
+        .column(::entity::building_state::Column::EntityId)
+        .filter(::entity::building_state::Column::ClaimEntityId.eq(claim_id))
+        .into_tuple::<i64>()
+        .all(&state.conn)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?;
+
+    if claim_building_ids.is_empty() {
+        return Ok(axum_codec::Codec(HouseOwnersByClaimResponse {
+            claim_entity_id: claim_id,
+            owners: Vec::new(),
+            total_housed_buildings: 0,
+        }));
+    }
+
+    let houses = ::entity::player_housing_state::Entity::find()
+        .filter(
+            sea_orm::Condition::any()
+                .add(
+                    ::entity::player_housing_state::Column::EntranceBuildingEntityId
+                        .is_in(claim_building_ids.clone()),
+                )
+                .add(::entity::player_housing_state::Column::EntityId.is_in(claim_building_ids)),
+        )
+        .all(&state.conn)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?;
+
+    // Get all entrance building IDs and building descriptions
+    let entrance_building_ids: Vec<i64> = houses
+        .iter()
+        .map(|h| h.entrance_building_entity_id)
+        .collect();
+    
+    let building_desc_ids: Vec<i32> = ::entity::building_state::Entity::find()
+        .select_only()
+        .column(::entity::building_state::Column::BuildingDescriptionId)
+        .filter(::entity::building_state::Column::EntityId.is_in(entrance_building_ids))
+        .into_tuple::<i32>()
+        .all(&state.conn)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
+        .into_iter()
+        .collect();
+
+    let building_descs = ::entity::building_desc::Entity::find()
+        .filter(::entity::building_desc::Column::Id.is_in(building_desc_ids))
+        .all(&state.conn)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?;
+
+    let building_name_map: HashMap<i32, String> = building_descs
+        .into_iter()
+        .map(|bd| (bd.id as i32, bd.name))
+        .collect();
+
+    let mut owners = Vec::new();
+    let mut total_buildings = 0u64;
+
+    for house in houses {
+        let owner_id = get_owner_entity_id_for_house(&state, &house).await;
+        
+        if owner_id == 0 {
+            continue;
+        }
+
+        total_buildings += 1;
+
+        // Get entrance building description ID to look up building name
+        let entrance_building = ::entity::building_state::Entity::find_by_id(house.entrance_building_entity_id)
+            .one(&state.conn)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?;
+
+        let building_name = if let Some(building) = entrance_building {
+            building_name_map
+                .get(&building.building_description_id)
+                .cloned()
+                .unwrap_or_else(|| format!("Building {}", house.entrance_building_entity_id))
+        } else {
+            format!("Building {}", house.entrance_building_entity_id)
+        };
+
+        // Check if building is locked (evicting) - locked_until is set to future time
+        let now_micros = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as i64;
+        
+        let eviction_countdown_seconds = if let Some(timer) = state
+            .eviction_timers
+            .get(&(house.entrance_building_entity_id, owner_id))
+        {
+            if let ScheduleAt::Time(timestamp) = timer.scheduled_at {
+                let scheduled_at_micros = timestamp.to_micros_since_unix_epoch() as i64;
+                let countdown_micros = scheduled_at_micros - now_micros;
+                if countdown_micros > 0 {
+                    Some(countdown_micros / 1_000_000)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let owner_username = ::entity::player_username_state::Entity::find_by_id(owner_id)
+            .one(&state.conn)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
+            .map(|u| u.username);
+
+        owners.push(HouseOwnerByClaimEntry {
+            owner_entity_id: owner_id,
+            owner_username,
+            building_entity_id: house.entrance_building_entity_id,
+            building_name,
+            eviction_countdown_seconds,
+        });
+    }
+
+    owners.sort_by_key(|entry| (entry.owner_entity_id, entry.building_entity_id));
+
+    Ok(axum_codec::Codec(HouseOwnersByClaimResponse {
+        claim_entity_id: claim_id,
+        owners,
+        total_housed_buildings: total_buildings,
+    }))
 }
 
 /// GET /houses/{id}

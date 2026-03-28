@@ -22,8 +22,10 @@ mod npc_desc;
 mod player_state;
 mod recipes;
 mod reducer_event_handler;
+mod resource_state;
 mod resource_desc;
 mod skill_descriptions;
+mod empire_chunk_state;
 mod trading_orders;
 mod traveler_task_desc;
 mod traveler_task_state;
@@ -537,6 +539,7 @@ struct AppState {
     sell_order_state:
         Arc<dashmap::DashMap<i64, entity::auction_listing_state::AuctionListingState>>,
     npc_desc: Arc<dashmap::DashMap<i32, entity::npc_desc::Model>>,
+    eviction_timers: Arc<dashmap::DashMap<(i64, i64), game_module::module_bindings::PlayerHousingEvictPlayerTimer>>,
     metrics_registry: prometheus::Registry,
     ranking_system: Arc<RankingSystem>,
 }
@@ -586,6 +589,7 @@ impl AppState {
             user_state: Arc::new(dashmap::DashMap::new()),
             deployable_state: Arc::new(dashmap::DashMap::new()),
             npc_desc: Arc::new(dashmap::DashMap::new()),
+            eviction_timers: Arc::new(dashmap::DashMap::new()),
             ranking_system: Arc::new(RankingSystem::default()),
         }
     }

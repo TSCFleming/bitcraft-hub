@@ -6,7 +6,7 @@ use axum::{
     http::HeaderValue,
     response::{Html, IntoResponse, Response},
     routing::get,
-    Json, Router,
+    Router,
 };
 use postgres::{Client, NoTls};
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 struct AppState {
     map_cache: Arc<tokio::sync::RwLock<HashMap<String, CachedMap>>>,
     map_cache_ttl: Duration,
-    icons_cache: Arc<tokio::sync::RwLock<HashMap<i32, CachedIcons>>>,
+    icons_cache: Arc<tokio::sync::RwLock<HashMap<String, CachedIcons>>>,
     icons_cache_ttl: Duration,
 }
 
@@ -93,6 +93,7 @@ struct TerrainQuery {
     dimension: Option<i32>,
     format: Option<String>,
     quality: Option<u8>,
+    resource_id: Option<i32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -427,7 +428,11 @@ WHERE "dimension" = $1"#,
     })
 }
 
-fn build_markers(dimension: i32, raster: &TerrainRaster) -> Result<Vec<Marker>, Box<dyn Error>> {
+fn build_markers(
+    dimension: i32,
+    raster: &TerrainRaster,
+    resource_id_filter: Option<i32>,
+) -> Result<Vec<Marker>, Box<dyn Error>> {
     let mut client = Client::connect(&get_database_url(), NoTls)?;
     let mut markers = Vec::new();
 
@@ -486,6 +491,41 @@ fn build_markers(dimension: i32, raster: &TerrainRaster) -> Result<Vec<Marker>, 
                 name: dungeon.name,
                 marker_type: "dungeon".to_string(),
                 icon_key: "dungeon".to_string(),
+                x,
+                y,
+            });
+        }
+    }
+
+    if let Some(resource_id) = resource_id_filter {
+        let dimension_i64 = dimension as i64;
+        for row in client.query(
+            r#"SELECT rs.entity_id, ls.x, ls.z
+FROM resource_state rs
+INNER JOIN location_state ls ON ls.entity_id = rs.entity_id
+WHERE rs.resource_id = $1
+  AND ls.dimension = $2"#,
+            &[&resource_id, &dimension_i64],
+        )? {
+            let entity_id: i64 = row.get(0);
+            let east_i64: i64 = row.get(1);
+            let north_i64: i64 = row.get(2);
+
+            if east_i64 < i32::MIN as i64 || east_i64 > i32::MAX as i64 {
+                continue;
+            }
+            if north_i64 < i32::MIN as i64 || north_i64 > i32::MAX as i64 {
+                continue;
+            }
+
+            let east = (east_i64 / 3) as i32;
+            let north = (north_i64 / 3) as i32;
+
+            let (x, y) = world_to_map(east, north, raster);
+            markers.push(Marker {
+                name: format!("Resource {} Entity {}", resource_id, entity_id),
+                marker_type: "resource".to_string(),
+                icon_key: "resource".to_string(),
                 x,
                 y,
             });
@@ -652,10 +692,17 @@ async fn icons(
     Query(query): Query<TerrainQuery>,
 ) -> Response {
     let dimension = query.dimension.unwrap_or(1);
+    let resource_id = query.resource_id;
+    let cache_key = format!(
+        "dim:{dimension}:resource:{}",
+        resource_id
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    );
 
     {
         let cache = state.icons_cache.read().await;
-        if let Some(cached) = cache.get(&dimension) {
+        if let Some(cached) = cache.get(&cache_key) {
             if cached.created_at.elapsed() < state.icons_cache_ttl {
                 let mut response = Response::new(cached.json.clone().into());
                 response
@@ -681,7 +728,7 @@ async fn icons(
 
     match tokio::task::spawn_blocking(move || {
         let raster = build_raster(dimension).map_err(|e| e.to_string())?;
-        let markers = build_markers(dimension, &raster).map_err(|e| e.to_string())?;
+        let markers = build_markers(dimension, &raster, resource_id).map_err(|e| e.to_string())?;
         Ok::<MarkerResponse, String>(MarkerResponse {
             width: raster.width,
             height: raster.height,
@@ -705,7 +752,7 @@ async fn icons(
             {
                 let mut cache = state.icons_cache.write().await;
                 cache.insert(
-                    dimension,
+                    cache_key,
                     CachedIcons {
                         json: body.clone(),
                         created_at: Instant::now(),
@@ -829,6 +876,10 @@ const INDEX_HTML: &str = r#"<!doctype html>
       <label>Dimension: <input id='dimension' type='number' value='1' style='width:90px' /></label>
       <button id='reload'>Reload</button>
     </div>
+        <div class='row'>
+            <label>Resource ID: <input id='resourceId' type='number' placeholder='e.g. 12' style='width:90px' /></label>
+            <button id='loadResource'>Load Resources</button>
+        </div>
     <div class='row small'>Wheel: zoom · Right-drag: pan · Left-click marker: name</div>
     <div class='row' id='status'>Loading…</div>
   </aside>
@@ -840,6 +891,8 @@ const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
 const dimInput = document.getElementById('dimension');
 const reloadBtn = document.getElementById('reload');
+const resourceIdInput = document.getElementById('resourceId');
+const loadResourceBtn = document.getElementById('loadResource');
 
 let mapImage = new Image();
 let markers = [];
@@ -858,6 +911,7 @@ function markerColor(type) {
   if (type === 'watchtower') return '#22c55e';
   if (type === 'temple') return '#60a5fa';
   if (type === 'dungeon') return '#a78bfa';
+    if (type === 'resource') return '#10b981';
   return '#ef4444';
 }
 
@@ -875,6 +929,7 @@ async function loadMarkerIcons() {
         aurumite_cave: ['aurumite_cave.png', 'aurumite_cave.webp'],
         luminite_cave: ['luminite_cave.png', 'luminite_cave.webp'],
         elenvar_cave: ['elenvar_cave.png', 'elenvar_cave.webp'],
+        resource: ['resource.png', 'resource.webp'],
     };
 
     for (const [key, candidates] of Object.entries(iconCandidates)) {
@@ -959,11 +1014,16 @@ function pickMarker(px, py) {
 
 async function loadData() {
   const dimension = parseInt(dimInput.value || '1', 10) || 1;
+    const resourceIdValue = (resourceIdInput.value || '').trim();
+    const parsedResourceId = resourceIdValue === '' ? null : parseInt(resourceIdValue, 10);
+    const useResourceId = Number.isInteger(parsedResourceId) ? parsedResourceId : null;
   statusEl.textContent = 'Loading map and markers…';
     const cacheBust = Date.now();
 
     const mapUrl = `/api/map.png?dimension=${dimension}&format=webp&t=${cacheBust}`;
-    const markerUrl = `/api/icons?dimension=${dimension}&t=${cacheBust}`;
+        const markerUrl = useResourceId === null
+            ? `/api/icons?dimension=${dimension}&t=${cacheBust}`
+            : `/api/icons?dimension=${dimension}&resource_id=${useResourceId}&t=${cacheBust}`;
 
   const markerRes = await fetch(markerUrl);
   if (!markerRes.ok) {
@@ -991,7 +1051,9 @@ async function loadData() {
   panX = (canvas.width - mapW) / 2;
   panY = (canvas.height - mapH) / 2;
 
-    statusEl.textContent = `Loaded ${markers.length} markers (${mapW}x${mapH}).`;
+        statusEl.textContent = useResourceId === null
+            ? `Loaded ${markers.length} markers (${mapW}x${mapH}).`
+            : `Loaded ${markers.length} markers for resource_id=${useResourceId} (${mapW}x${mapH}).`;
   draw();
 }
 
@@ -1044,6 +1106,7 @@ canvas.addEventListener('click', (event) => {
 });
 
 reloadBtn.addEventListener('click', () => { loadData().catch((e) => { statusEl.textContent = e.message; }); });
+loadResourceBtn.addEventListener('click', () => { loadData().catch((e) => { statusEl.textContent = e.message; }); });
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 loadData().catch((e) => { statusEl.textContent = e.message; });
