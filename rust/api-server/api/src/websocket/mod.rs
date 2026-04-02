@@ -656,7 +656,7 @@ async fn connect_to_db_logic(
         // "select location_state.* from location_state JOIN player_state ps ON player_state.entity_id = location_state.entity_id", // This currently takes to much cpu to run
         // "select location_state.* from location_state JOIN building_state ps ON building_state.entity_id = building_state.entity_id", // This currently takes to much cpu to run
         // "select location_state.* from location_state JOIN deployable_state ps ON deployable_state.entity_id = deployable_state.entity_id", // This currently takes to much cpu to run
-        "terrain_chunk_state",
+        // "terrain_chunk_state",
         "traveler_task_desc",
         "traveler_task_state",
         // "trade_order_state",
@@ -674,7 +674,7 @@ async fn connect_to_db_logic(
     let sql_subscribe = vec![
         "SELECT location_state.* FROM location_state JOIN building_state ON location_state.entity_id = building_state.entity_id",
         "SELECT location_state.* FROM location_state JOIN portal_state ON location_state.entity_id = portal_state.entity_id",
-        "SELECT location_state.* FROM location_state JOIN resource_state ON location_state.entity_id = resource_state.entity_id",
+        // "SELECT location_state.* FROM location_state JOIN resource_state ON location_state.entity_id = resource_state.entity_id",
         "SELECT mobile_entity_state.* FROM mobile_entity_state JOIN player_state ON mobile_entity_state.entity_id = player_state.entity_id",
     ];
 

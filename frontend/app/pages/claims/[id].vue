@@ -141,9 +141,12 @@ watch(
   { immediate: true },
 );
 
-const formatEvictionCountdown = (countdownSeconds: bigint | null | undefined): string => {
+const formatEvictionCountdown = (
+  countdownSeconds: bigint | null | undefined,
+  isClaimMember: boolean,
+): string => {
   if (countdownSeconds === null || countdownSeconds === undefined) {
-    return "Resident";
+    return isClaimMember ? "Citizen" : "Resident";
   }
 
   const seconds = Number(countdownSeconds);
@@ -167,12 +170,16 @@ const claimHouseOwnersRows = computed(() => {
   return (houseOwnersByClaimFetch.value?.owners ?? []).map((owner) => {
     const key = owner.owner_entity_id.toString();
     const player = houseOwnerPlayerData.value[key];
+    const isClaimMember = Boolean(claimFetch.value?.members?.[key]);
 
     return {
       ...owner,
       owner_name: owner.owner_username ?? player?.username ?? key,
       last_login_sort: getLastLoginSortValue(player),
-      eviction_countdown_display: formatEvictionCountdown(owner.eviction_countdown_seconds),
+      eviction_countdown_display: formatEvictionCountdown(
+        owner.eviction_countdown_seconds,
+        isClaimMember,
+      ),
     };
   });
 });

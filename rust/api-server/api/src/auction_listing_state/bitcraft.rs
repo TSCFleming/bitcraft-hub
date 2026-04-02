@@ -8,6 +8,36 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::sleep;
 
+fn parse_region_from_database_name(database_name: &str) -> Option<i32> {
+    let stripped = database_name
+        .strip_prefix("bitcraft-")
+        .unwrap_or(database_name)
+        .trim();
+
+    if let Ok(region) = stripped.parse::<i32>() {
+        return Some(region);
+    }
+
+    // Some deployments include extra segments (e.g. "bitcraft-eu-1").
+    // Fall back to the last run of ASCII digits we can find.
+    let mut last_digits: Option<String> = None;
+    let mut current = String::new();
+
+    for ch in stripped.chars() {
+        if ch.is_ascii_digit() {
+            current.push(ch);
+        } else if !current.is_empty() {
+            last_digits = Some(std::mem::take(&mut current));
+        }
+    }
+
+    if !current.is_empty() {
+        last_digits = Some(current);
+    }
+
+    last_digits.and_then(|digits| digits.parse::<i32>().ok())
+}
+
 pub(crate) fn start_worker_sell_order_state(
     global_app_state: AppState,
     mut rx: UnboundedReceiver<SpacetimeUpdateMessages<AuctionListingState>>,
@@ -38,8 +68,13 @@ pub(crate) fn start_worker_sell_order_state(
                     Some(msg) = rx.recv() => {
                         match msg {
                             SpacetimeUpdateMessages::Initial { data, database_name, .. } => {
+                                let Some(region) = parse_region_from_database_name(database_name.as_ref().as_str()) else {
+                                    tracing::warn!(database_name = %database_name.as_ref(), "Could not parse region from database_name for AuctionListingState (sell); skipping batch");
+                                    continue;
+                                };
+
                                 data.into_par_iter().for_each(|value| {
-                                    let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(value).with_region(database_name.to_string().replace("bitcraft-", "").parse().unwrap()).build();
+                                    let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(value).with_region(region).build();
                                     let _ = global_app_state.tx.send(WebSocketMessages::InsertSellOrder(model.clone()));
                                     global_app_state.sell_order_state.insert(model.entity_id as i64, model);
                                 });
@@ -89,7 +124,11 @@ pub(crate) fn start_worker_sell_order_state(
                                 // }
                             }
                             SpacetimeUpdateMessages::Insert { new, database_name, .. } => {
-                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(new).with_region(database_name.to_string().replace("bitcraft-", "").parse().unwrap()).build();
+                                let Some(region) = parse_region_from_database_name(database_name.as_ref().as_str()) else {
+                                    tracing::warn!(database_name = %database_name.as_ref(), "Could not parse region from database_name for AuctionListingState::Insert (sell); skipping");
+                                    continue;
+                                };
+                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(new).with_region(region).build();
                                 global_app_state.sell_order_state.insert(model.entity_id as i64, model.clone());
                                 let _ = global_app_state.tx.send(WebSocketMessages::InsertSellOrder(model.clone()));
                                 // if ids.contains(&model.entity_id) {
@@ -105,7 +144,11 @@ pub(crate) fn start_worker_sell_order_state(
                                 // }
                             }
                             SpacetimeUpdateMessages::Update { new, database_name,   .. } => {
-                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(new).with_region(database_name.to_string().replace("bitcraft-", "").parse().unwrap()).build();
+                                let Some(region) = parse_region_from_database_name(database_name.as_ref().as_str()) else {
+                                    tracing::warn!(database_name = %database_name.as_ref(), "Could not parse region from database_name for AuctionListingState::Update (sell); skipping");
+                                    continue;
+                                };
+                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(new).with_region(region).build();
                                 global_app_state.sell_order_state.insert(model.entity_id as i64, model.clone());
 
                                 // match event {
@@ -130,7 +173,11 @@ pub(crate) fn start_worker_sell_order_state(
                                 // }
                             }
                             SpacetimeUpdateMessages::Remove { delete, database_name, .. } => {
-                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(delete).with_region(database_name.to_string().replace("bitcraft-", "").parse().unwrap()).build();
+                                let Some(region) = parse_region_from_database_name(database_name.as_ref().as_str()) else {
+                                    tracing::warn!(database_name = %database_name.as_ref(), "Could not parse region from database_name for AuctionListingState::Remove (sell); skipping");
+                                    continue;
+                                };
+                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(delete).with_region(region).build();
                                 global_app_state.sell_order_state.remove(&(model.entity_id as i64));
                                 let _ = global_app_state.tx.send(WebSocketMessages::RemoveSellOrder(model.clone()));
 
@@ -225,8 +272,13 @@ pub(crate) fn start_worker_buy_order_state(
                     Some(msg) = rx.recv() => {
                         match msg {
                             SpacetimeUpdateMessages::Initial { data, database_name, .. } => {
+                                let Some(region) = parse_region_from_database_name(database_name.as_ref().as_str()) else {
+                                    tracing::warn!(database_name = %database_name.as_ref(), "Could not parse region from database_name for AuctionListingState (buy); skipping batch");
+                                    continue;
+                                };
+
                                 data.into_par_iter().for_each(|value| {
-                                    let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(value).with_region(database_name.to_string().replace("bitcraft-", "").parse().unwrap()).build();
+                                    let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(value).with_region(region).build();
                                     let _ = global_app_state.tx.send(WebSocketMessages::InsertBuyOrder(model.clone()));
                                     global_app_state.buy_order_state.insert(model.entity_id as i64, model);
                                 });
@@ -276,7 +328,11 @@ pub(crate) fn start_worker_buy_order_state(
                                 // }
                             }
                             SpacetimeUpdateMessages::Insert { new, database_name, .. } => {
-                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(new).with_region(database_name.to_string().replace("bitcraft-", "").parse().unwrap()).build();
+                                let Some(region) = parse_region_from_database_name(database_name.as_ref().as_str()) else {
+                                    tracing::warn!(database_name = %database_name.as_ref(), "Could not parse region from database_name for AuctionListingState::Insert (buy); skipping");
+                                    continue;
+                                };
+                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(new).with_region(region).build();
                                     let _ = global_app_state.tx.send(WebSocketMessages::InsertBuyOrder(model.clone()));
                                 global_app_state.buy_order_state.insert(model.entity_id as i64, model);
                                 // if ids.contains(&model.entity_id) {
@@ -292,7 +348,11 @@ pub(crate) fn start_worker_buy_order_state(
                                 // }
                             }
                             SpacetimeUpdateMessages::Update { new, database_name,   .. } => {
-                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(new).with_region(database_name.to_string().replace("bitcraft-", "").parse().unwrap()).build();
+                                let Some(region) = parse_region_from_database_name(database_name.as_ref().as_str()) else {
+                                    tracing::warn!(database_name = %database_name.as_ref(), "Could not parse region from database_name for AuctionListingState::Update (buy); skipping");
+                                    continue;
+                                };
+                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(new).with_region(region).build();
                                 let _ = global_app_state.tx.send(WebSocketMessages::UpdateBuyOrder(model.clone()));
                                 global_app_state.buy_order_state.insert(model.entity_id as i64, model);
                                 // match event {
@@ -317,7 +377,11 @@ pub(crate) fn start_worker_buy_order_state(
                                 // }
                             }
                             SpacetimeUpdateMessages::Remove { delete, database_name, .. } => {
-                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(delete).with_region(database_name.to_string().replace("bitcraft-", "").parse().unwrap()).build();
+                                let Some(region) = parse_region_from_database_name(database_name.as_ref().as_str()) else {
+                                    tracing::warn!(database_name = %database_name.as_ref(), "Could not parse region from database_name for AuctionListingState::Remove (buy); skipping");
+                                    continue;
+                                };
+                                let model: ::entity::auction_listing_state::AuctionListingState = ::entity::auction_listing_state::AuctionListingStateBuilder::new(delete).with_region(region).build();
                                 let _ = global_app_state.tx.send(WebSocketMessages::RemoveBuyOrder(model.clone()));
                                 global_app_state.buy_order_state.remove(&(model.entity_id as i64));
 

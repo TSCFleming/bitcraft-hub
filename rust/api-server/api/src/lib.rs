@@ -61,7 +61,7 @@ use kanal::AsyncSender;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use metrics_process::Collector;
 use migration::{Migrator, MigratorTrait};
-use sea_orm::{ConnectOptions, EntityTrait};
+use sea_orm::{ConnectOptions, EntityTrait, PaginatorTrait};
 use sea_orm_cli::MigrateSubcommands;
 use serde::Deserialize;
 use service::sea_orm::{Database, DatabaseConnection};
@@ -595,239 +595,301 @@ impl AppState {
     }
 
     async fn fill_state_from_db(&self) {
-        let _ = tokio::join!(
-            async move {
-                ::entity::item_desc::Entity::find()
-                    .all(&self.conn)
-                    .await
-                    .unwrap_or_else(|err| {
+        // Loading large tables with `.all()` can attempt a single huge allocation.
+        // Paging keeps peak memory bounded (especially important on Windows/MSVC).
+        const PAGE_SIZE: u64 = 10_000;
+
+        {
+            let paginator = ::entity::item_desc::Entity::find().paginate(&self.conn, PAGE_SIZE);
+            let mut page = 0;
+            loop {
+                let values = match paginator.fetch_page(page).await {
+                    Ok(values) => values,
+                    Err(err) => {
                         tracing::error!(
                             error = err.to_string(),
                             "Error loading item_desc in fill_state_from_db"
                         );
+                        break;
+                    }
+                };
+                if values.is_empty() {
+                    break;
+                }
+                for value in values {
+                    let id = value.id;
+                    self.item_desc.insert(id, value);
+                }
+                page += 1;
+            }
+        }
 
-                        vec![]
-                    })
-                    .into_iter()
-                    .for_each(|value| {
-                        self.item_desc.insert(value.id, value.clone());
-                    });
-            },
-            async move {
-                ::entity::cargo_desc::Entity::find()
-                    .all(&self.conn)
-                    .await
-                    .unwrap_or_else(|err| {
+        {
+            let paginator = ::entity::cargo_desc::Entity::find().paginate(&self.conn, PAGE_SIZE);
+            let mut page = 0;
+            loop {
+                let values = match paginator.fetch_page(page).await {
+                    Ok(values) => values,
+                    Err(err) => {
                         tracing::error!(
                             error = err.to_string(),
                             "Error loading cargo_desc in fill_state_from_db"
                         );
+                        break;
+                    }
+                };
+                if values.is_empty() {
+                    break;
+                }
+                for value in values {
+                    let id = value.id;
+                    self.cargo_desc.insert(id, value);
+                }
+                page += 1;
+            }
+        }
 
-                        vec![]
-                    })
-                    .into_iter()
-                    .for_each(|value| {
-                        self.cargo_desc.insert(value.id, value.clone());
-                    });
-            },
-            // async move {
-            //     ::entity::inventory::Entity::find()
-            //         .all(&self.conn)
-            //         .await
-            //         .unwrap_or_else(|err| {
-            //             tracing::error!(
-            //                 error = err.to_string(),
-            //                 "Error loading inventory in fill_state_from_db"
-            //             );
-            //
-            //             vec![]
-            //         })
-            //         .into_iter()
-            //         .for_each(|value| {
-            //             self.inventory_state.insert(value.entity_id, value.clone());
-            //         });
-            // },
-            async move {
-                ::entity::claim_local_state::Entity::find()
-                    .all(&self.conn)
-                    .await
-                    .unwrap_or_else(|err| {
+        {
+            let paginator =
+                ::entity::claim_local_state::Entity::find().paginate(&self.conn, PAGE_SIZE);
+            let mut page = 0;
+            loop {
+                let values = match paginator.fetch_page(page).await {
+                    Ok(values) => values,
+                    Err(err) => {
                         tracing::error!(
                             error = err.to_string(),
                             "Error loading claim_local_state in fill_state_from_db"
                         );
+                        break;
+                    }
+                };
+                if values.is_empty() {
+                    break;
+                }
+                for value in values {
+                    let entity_id = value.entity_id as u64;
+                    self.claim_local_state.insert(entity_id, value);
+                }
+                page += 1;
+            }
+        }
 
-                        vec![]
-                    })
-                    .into_iter()
-                    .for_each(|value| {
-                        self.claim_local_state
-                            .insert(value.entity_id as u64, value.clone());
-                    });
-            },
-            async move {
-                ::entity::skill_desc::Entity::find()
-                    .all(&self.conn)
-                    .await
-                    .unwrap_or_else(|err| {
+        {
+            let paginator = ::entity::skill_desc::Entity::find().paginate(&self.conn, PAGE_SIZE);
+            let mut page = 0;
+            loop {
+                let values = match paginator.fetch_page(page).await {
+                    Ok(values) => values,
+                    Err(err) => {
                         tracing::error!(
                             error = err.to_string(),
                             "Error loading skill_desc in fill_state_from_db"
                         );
+                        break;
+                    }
+                };
+                if values.is_empty() {
+                    break;
+                }
+                for value in values {
+                    let id = value.id;
+                    self.skill_desc.insert(id, value);
+                }
+                page += 1;
+            }
+        }
 
-                        vec![]
-                    })
-                    .into_iter()
-                    .for_each(|value| {
-                        self.skill_desc.insert(value.id, value.clone());
-                    });
-            },
-            async move {
-                ::entity::building_desc::Entity::find()
-                    .all(&self.conn)
-                    .await
-                    .unwrap_or_else(|err| {
+        {
+            let paginator =
+                ::entity::building_desc::Entity::find().paginate(&self.conn, PAGE_SIZE);
+            let mut page = 0;
+            loop {
+                let values = match paginator.fetch_page(page).await {
+                    Ok(values) => values,
+                    Err(err) => {
                         tracing::error!(
                             error = err.to_string(),
                             "Error loading building_desc in fill_state_from_db"
                         );
+                        break;
+                    }
+                };
+                if values.is_empty() {
+                    break;
+                }
+                for value in values {
+                    let id = value.id;
+                    self.building_desc.insert(id, value);
+                }
+                page += 1;
+            }
+        }
 
-                        vec![]
-                    })
-                    .into_iter()
-                    .for_each(|value| {
-                        self.building_desc.insert(value.id, value.clone());
-                    });
-            },
-            async move {
-                ::entity::building_nickname_state::Entity::find()
-                    .all(&self.conn)
-                    .await
-                    .unwrap_or_else(|err| {
+        {
+            let paginator = ::entity::building_nickname_state::Entity::find()
+                .paginate(&self.conn, PAGE_SIZE);
+            let mut page = 0;
+            loop {
+                let values = match paginator.fetch_page(page).await {
+                    Ok(values) => values,
+                    Err(err) => {
                         tracing::error!(
                             error = err.to_string(),
                             "Error loading building_nickname_state in fill_state_from_db"
                         );
+                        break;
+                    }
+                };
+                if values.is_empty() {
+                    break;
+                }
+                for value in values {
+                    let entity_id = value.entity_id;
+                    self.building_nickname_state.insert(entity_id, value);
+                }
+                page += 1;
+            }
+        }
 
-                        vec![]
-                    })
-                    .into_iter()
-                    .for_each(|value| {
-                        self.building_nickname_state
-                            .insert(value.entity_id, value.clone());
-                    });
-            },
-            async move {
-                ::entity::crafting_recipe::Entity::find()
-                    .all(&self.conn)
-                    .await
-                    .unwrap_or_else(|err| {
+        {
+            let paginator =
+                ::entity::crafting_recipe::Entity::find().paginate(&self.conn, PAGE_SIZE);
+            let mut page = 0;
+            loop {
+                let values = match paginator.fetch_page(page).await {
+                    Ok(values) => values,
+                    Err(err) => {
                         tracing::error!(
                             error = err.to_string(),
                             "Error loading crafting_recipe in fill_state_from_db"
                         );
+                        break;
+                    }
+                };
+                if values.is_empty() {
+                    break;
+                }
+                for value in values {
+                    let id = value.id;
+                    self.crafting_recipe_desc.insert(id, value);
+                }
+                page += 1;
+            }
+        }
 
-                        vec![]
-                    })
-                    .into_iter()
-                    .for_each(|value| {
-                        self.crafting_recipe_desc.insert(value.id, value.clone());
-                    });
-            },
-            async move {
-                ::entity::item_list_desc::Entity::find()
-                    .all(&self.conn)
-                    .await
-                    .unwrap_or_else(|err| {
+        {
+            let paginator =
+                ::entity::item_list_desc::Entity::find().paginate(&self.conn, PAGE_SIZE);
+            let mut page = 0;
+            loop {
+                let values = match paginator.fetch_page(page).await {
+                    Ok(values) => values,
+                    Err(err) => {
                         tracing::error!(
                             error = err.to_string(),
                             "Error loading item_list_desc in fill_state_from_db"
                         );
+                        break;
+                    }
+                };
+                if values.is_empty() {
+                    break;
+                }
+                for value in values {
+                    let id = value.id;
+                    self.item_list_desc.insert(id, value);
+                }
+                page += 1;
+            }
+        }
 
-                        vec![]
-                    })
-                    .into_iter()
-                    .for_each(|value| {
-                        self.item_list_desc.insert(value.id, value.clone());
-                    });
-            },
-            async move {
-                ::entity::player_state::Entity::find()
-                    .all(&self.conn)
-                    .await
-                    .unwrap_or_else(|err| {
+        {
+            let paginator =
+                ::entity::player_state::Entity::find().paginate(&self.conn, PAGE_SIZE);
+            let mut page = 0;
+            loop {
+                let values = match paginator.fetch_page(page).await {
+                    Ok(values) => values,
+                    Err(err) => {
                         tracing::error!(
                             error = err.to_string(),
-                            "Error loading claim_local_state in fill_state_from_db"
+                            "Error loading player_state in fill_state_from_db"
                         );
-
-                        vec![]
-                    })
-                    .into_iter()
-                    .for_each(|value| {
-                        self.player_state.insert(value.entity_id, value.clone());
-                        self.ranking_system
-                            .time_played
-                            .update(value.entity_id, value.time_played as i64);
-                        self.ranking_system
-                            .time_signed_in
-                            .update(value.entity_id, value.time_signed_in as i64);
-                    });
-
-                let entries = service::Query::get_experience_state_top_x_total_experience(
-                    &self.conn,
-                    Some(EXCLUDED_USERS_FROM_LEADERBOARD.clone()),
-                    Some(EXCLUDED_SKILLS_FROM_GLOBAL_LEADERBOARD_SKILLS_CATEGORY),
-                    None,
-                )
-                .await
-                .unwrap_or_else(|error| {
-                    error!("Error: {error}");
-
-                    vec![]
-                });
-
-                for entry in entries.into_iter() {
-                    self.ranking_system
-                        .global_leaderboard
-                        .update(entry.0, entry.1);
-
-                    let mut xp_per_hour = 0;
-
-                    if let Some(player_state) = self.player_state.get(&entry.0) {
-                        if player_state.time_signed_in >= 3600 {
-                            xp_per_hour = entry.1 / (player_state.time_signed_in as i64 / 3600);
-                        }
+                        break;
                     }
-
-                    self.ranking_system.xp_per_hour.update(entry.0, xp_per_hour)
+                };
+                if values.is_empty() {
+                    break;
                 }
-            },
-            async move {
-                let generated_level_sql =
-                    generate_mysql_sum_level_sql_statement!(leaderboard::EXPERIENCE_PER_LEVEL);
+                for value in values {
+                    let entity_id = value.entity_id;
+                    let time_played = value.time_played as i64;
+                    let time_signed_in = value.time_signed_in as i64;
 
-                let entries = service::Query::get_experience_state_top_x_total_level(
-                    &self.conn,
-                    generated_level_sql,
-                    Some(EXCLUDED_USERS_FROM_LEADERBOARD.clone()),
-                    Some(EXCLUDED_SKILLS_FROM_GLOBAL_LEADERBOARD_SKILLS_CATEGORY),
-                    None,
-                )
-                .await
-                .unwrap_or_else(|error| {
-                    error!("Error: {error}");
-
-                    vec![]
-                });
-
-                for entry in entries.into_iter() {
+                    self.player_state.insert(entity_id, value);
+                    self.ranking_system.time_played.update(entity_id, time_played);
                     self.ranking_system
-                        .level_leaderboard
-                        .update(entry.0 as i64, entry.1 as i64)
+                        .time_signed_in
+                        .update(entity_id, time_signed_in);
                 }
-            },
-        );
+                page += 1;
+            }
+
+            let entries = service::Query::get_experience_state_top_x_total_experience(
+                &self.conn,
+                Some(EXCLUDED_USERS_FROM_LEADERBOARD.clone()),
+                Some(EXCLUDED_SKILLS_FROM_GLOBAL_LEADERBOARD_SKILLS_CATEGORY),
+                None,
+            )
+            .await
+            .unwrap_or_else(|error| {
+                error!("Error: {error}");
+
+                vec![]
+            });
+
+            for entry in entries.into_iter() {
+                self.ranking_system
+                    .global_leaderboard
+                    .update(entry.0, entry.1);
+
+                let mut xp_per_hour = 0;
+
+                if let Some(player_state) = self.player_state.get(&entry.0) {
+                    if player_state.time_signed_in >= 3600 {
+                        xp_per_hour = entry.1 / (player_state.time_signed_in as i64 / 3600);
+                    }
+                }
+
+                self.ranking_system.xp_per_hour.update(entry.0, xp_per_hour)
+            }
+        }
+
+        {
+            let generated_level_sql =
+                generate_mysql_sum_level_sql_statement!(leaderboard::EXPERIENCE_PER_LEVEL);
+
+            let entries = service::Query::get_experience_state_top_x_total_level(
+                &self.conn,
+                generated_level_sql,
+                Some(EXCLUDED_USERS_FROM_LEADERBOARD.clone()),
+                Some(EXCLUDED_SKILLS_FROM_GLOBAL_LEADERBOARD_SKILLS_CATEGORY),
+                None,
+            )
+            .await
+            .unwrap_or_else(|error| {
+                error!("Error: {error}");
+
+                vec![]
+            });
+
+            for entry in entries.into_iter() {
+                self.ranking_system
+                    .level_leaderboard
+                    .update(entry.0 as i64, entry.1 as i64)
+            }
+        }
 
         let _ = tokio::join!(async move {
             for skill in self.skill_desc.iter() {
